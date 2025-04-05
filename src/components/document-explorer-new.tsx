@@ -776,7 +776,8 @@ export default function DocumentExplorerNew() {
 
         <TabsContent value="search" className="mt-4">
           <AISearch
-            files={folderContents.files} // Pass all files for potential fallback search
+            // Ensure files prop is always an array, defaulting to [] if folderContents.files is null/undefined
+            files={folderContents.files || []}
             onFileSelect={handleFileSelection}
           />
         </TabsContent>

@@ -1048,12 +1048,13 @@ export const uploadFile = async (
 
       // Send metadata to n8n for processing
       // Using IIFE for fire-and-forget with async/await and error handling
-      (async () => {
-        try {
-          const processedData = await processDocumentWithN8n({
-            fileId,
-            folderId,
-            userId,
+        (async () => {
+          try {
+            const processedData = await processDocumentWithN8n({
+              fileId,
+              fileName: file.name, // Added fileName
+              folderId,
+              userId,
             fileType: fileExtension,
             storagePath,
             publicUrl,

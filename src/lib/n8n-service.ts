@@ -89,18 +89,19 @@ export interface ProcessDocumentResponse {
 
 /**
  * Sends document metadata to n8n for processing
- * @param metadata The metadata of the uploaded file
+ * @param metadata The metadata of the uploaded file, including the file name
  * @returns The processed document data
  */
 export async function processDocumentWithN8n(metadata: {
   fileId: string;
+  fileName?: string; // Added fileName
   folderId?: string;
   userId?: string;
   fileType?: string;
   storagePath?: string;
   publicUrl?: string;
 }): Promise<ProcessDocumentResponse | null> {
-  console.log("Notifying n8n about uploaded document metadata only:", metadata);
+  console.log("Notifying n8n about uploaded document metadata:", metadata); // Updated log message
 
   try {
     // Use the store webhook URL for document processing
@@ -144,51 +145,83 @@ export async function processDocumentWithN8n(metadata: {
       clearTimeout(timeoutId);
 
       // Handle response with better error handling
-      let responseData = {};
+      let responseData: ProcessDocumentResponse | null = null;
       try {
-        responseData = await response.json();
-        console.log("Webhook response data:", responseData);
+        // Attempt to parse JSON, assuming it matches ProcessDocumentResponse structure
+        const parsedData = await response.json();
+        console.log("Webhook response data:", parsedData);
+
+        // Basic validation to ensure it looks like ProcessDocumentResponse
+        if (parsedData && typeof parsedData.id === 'string' && typeof parsedData.name === 'string' && typeof parsedData.processed === 'boolean') {
+          responseData = {
+            ...parsedData,
+            // Ensure extractedText is always a string, even if missing or null in response
+            extractedText: typeof parsedData.extractedText === 'string' ? parsedData.extractedText : "",
+          };
+        } else {
+           console.log("Parsed response data does not match expected structure, using default.");
+           // Fallback if structure is wrong
+           responseData = {
+             id: metadata.fileId || "",
+             name: metadata.fileName || "Document", // Use fileName if available
+             processed: false, // Indicate processing likely failed if response is bad
+             extractedText: "",
+             metadata: { ...metadata, responseError: "Invalid response structure" },
+           };
+        }
+
       } catch (e) {
-        console.log("Failed to parse JSON response, using default response");
+        const parseError = e instanceof Error ? e.message : String(e);
+        console.log("Failed to parse JSON response:", parseError);
+        // Default response on JSON parse failure
         responseData = {
           id: metadata.fileId || "",
-          name: "Document",
-          processed: true,
-          extractedText: "Mock extracted text for development",
-          metadata: { ...metadata },
+          name: metadata.fileName || "Document", // Use fileName if available
+          processed: false, // Indicate processing likely failed
+          extractedText: "",
+          metadata: { ...metadata, error: `JSON Parse Error: ${parseError}` },
         };
       }
 
       console.log("n8n webhook response status:", response.status);
-      console.log("n8n webhook request successful");
-
-      // Ensure extractedText is never undefined
-      if (responseData && responseData.extractedText === undefined) {
-        responseData.extractedText = "";
+      if (response.ok && responseData) {
+         console.log("n8n webhook request successful");
+         return responseData;
+      } else {
+         console.log("n8n webhook request failed or response invalid");
+         // Return the potentially modified responseData which might contain error info
+         return responseData ?? { // Return default if responseData is somehow still null
+            id: metadata.fileId || "",
+            name: metadata.fileName || "Document",
+            processed: false,
+            extractedText: "",
+            metadata: { ...metadata, error: `HTTP Status: ${response.status}` },
+         };
       }
 
-      return responseData;
-    } catch (fetchError) {
+    } catch (fetchError: unknown) {
       clearTimeout(timeoutId);
-      console.error("Fetch error during webhook call:", fetchError);
+      const errorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      console.error("Fetch error during webhook call:", errorMessage);
       // Instead of throwing, return a default response
       return {
         id: metadata.fileId || "",
-        name: "Document",
+        name: metadata.fileName || "Document", // Use fileName if available
         processed: false,
         extractedText: "",
-        metadata: { error: fetchError.message || "Connection failed" },
+        metadata: { ...metadata, error: `Connection failed: ${errorMessage}` },
       };
     }
-  } catch (error) {
-    console.error("Error notifying n8n about document:", error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Error notifying n8n about document:", errorMessage);
     // Return a default response instead of throwing an error
     return {
       id: metadata.fileId || "",
-      name: "Unknown",
+      name: metadata.fileName || "Unknown", // Use fileName if available
       processed: false,
       extractedText: "", // Add default empty string for extractedText
-      metadata: { error: error.message || "Unknown error" },
+      metadata: { ...metadata, error: `Unknown error: ${errorMessage}` },
     };
   }
 }

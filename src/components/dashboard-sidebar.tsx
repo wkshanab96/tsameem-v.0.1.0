@@ -134,7 +134,7 @@ export default function DashboardSidebar({
     >
       <ResizablePanelGroup direction="horizontal">
         <ResizablePanel
-          defaultSize={20}
+          defaultSize={5} // Start collapsed by default
           minSize={5}
           maxSize={30}
           collapsible={true}

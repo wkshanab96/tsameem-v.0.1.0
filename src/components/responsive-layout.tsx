@@ -17,14 +17,8 @@ export function ResponsiveLayout({ children }: ResponsiveLayoutProps) {
     window.addEventListener("sidebar-expand", handleSidebarExpand);
     window.addEventListener("sidebar-collapse", handleSidebarCollapse);
 
-    // Check initial sidebar state
-    const sidebarElement = document.querySelector(".sidebar-panel");
-    if (
-      sidebarElement &&
-      window.getComputedStyle(sidebarElement).width === "240px"
-    ) {
-      setIsSidebarExpanded(true);
-    }
+    // Initial state is collapsed (false), event listeners will handle changes
+    // Removed unreliable initial width check here
 
     return () => {
       window.removeEventListener("sidebar-expand", handleSidebarExpand);

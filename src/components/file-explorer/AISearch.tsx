@@ -32,20 +32,21 @@ interface SearchResponse {
 
 export const AISearch = ({ files, onFileSelect }: AISearchProps) => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<FileType[]>([]);
+  const [searchResults, setSearchResults] = useState<FileType[]>([]); // This will now hold the files returned directly by the API
   const [isSearching, setIsSearching] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [searchExcerpts, setSearchExcerpts] = useState<Record<string, string>>(
-    {},
-  );
+  // Remove searchExcerpts state as it's no longer used
+  // const [searchExcerpts, setSearchExcerpts] = useState<Record<string, string>>(
+  //   {},
+  // );
   const [isRagEnabled, setIsRagEnabled] = useState(true);
 
   // Handle search with RAG integration
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
-      setSearchExcerpts({});
+      // Remove setSearchExcerpts({});
       setAiSuggestion(null);
       setSearchError(null);
       return;
@@ -59,77 +60,87 @@ export const AISearch = ({ files, onFileSelect }: AISearchProps) => {
       if (isRagEnabled) {
         // Use the RAG system via n8n webhook
         const response = await axios.post("/api/search", {
-          chatInput: searchQuery, // Renamed 'query' to 'chatInput'
+          // Ensure only one chatInput property exists
+          chatInput: searchQuery,
           limit: 10,
-          includeExcerpts: true,
+          // includeExcerpts is not relevant for the current N8N flow
         });
+        console.log("Raw API response data:", response.data); // Log the raw response
 
-        const data = response.data as SearchResponse;
+        // The backend now returns { results: FileType[], suggestion?: string }
+        const data = response.data; // Assign first without assertion
 
-        if (data.error) {
-          throw new Error(data.error);
+        // Basic check if data is an object before accessing properties
+        if (!data || typeof data !== 'object') {
+            console.error("Invalid API response structure:", data);
+            throw new Error("Received invalid response structure from API.");
         }
 
-        // Map the search results to files
-        const resultMap = new Map<
-          string,
-          { score: number; excerpt?: string }
-        >();
-        data.results.forEach((result) => {
-          resultMap.set(result.fileId, {
-            score: result.score,
-            excerpt: result.excerpt,
-          });
-        });
+        // Now assert the type after basic validation
+        const typedData = data as { results: FileType[], suggestion?: string, error?: string };
+        console.log("Parsed/Asserted data:", typedData); // Log after assertion
 
-        // Find the matching files and sort by score
-        const matchedFiles = files
-          .filter((file) => resultMap.has(file.id))
-          .sort((a, b) => {
-            const scoreA = resultMap.get(a.id)?.score || 0;
-            const scoreB = resultMap.get(b.id)?.score || 0;
-            return scoreB - scoreA; // Higher score first
-          });
+        if (typedData.error) { // Check for explicit error property
+          throw new Error(typedData.error);
+        }
 
-        // Extract excerpts
-        const excerpts: Record<string, string> = {};
-        matchedFiles.forEach((file) => {
-          const excerpt = resultMap.get(file.id)?.excerpt;
-          if (excerpt) {
-            excerpts[file.id] = excerpt;
-          }
-        });
+        // Explicitly check if results is an array before using it
+        if (!Array.isArray(typedData.results)) {
+            console.error("API response data.results is not an array:", typedData.results);
+            throw new Error("Invalid API response format: results is not an array.");
+        }
 
-        setSearchResults(matchedFiles);
-        setSearchExcerpts(excerpts);
+        // Directly use the results from the API response
+        // The backend already filters/finds the relevant file based on N8N output
+        // Add final redundant check to ensure it's an array before setting state
+        const foundFiles = Array.isArray(typedData.results) ? typedData.results : [];
+
+        // Remove the resultMap and filtering logic
+        // const resultMap = new Map<
+        //   string,
+        //   { score: number; excerpt?: string }
+        // >();
+        // data.results.forEach((result) => { ... });
+        // const matchedFiles = files.filter(...)
+
+        // Remove excerpt logic
+        // const excerpts: Record<string, string> = {};
+        // matchedFiles.forEach((file) => { ... });
+
+        setSearchResults(foundFiles); // Set state with files from API
+        // Remove setSearchExcerpts(excerpts);
 
         // Set AI suggestion if provided
-        if (data.suggestion) {
-          setAiSuggestion(data.suggestion);
-        } else if (matchedFiles.length === 0) {
+        if (typedData.suggestion) {
+          setAiSuggestion(typedData.suggestion);
+        // Update suggestion logic based on foundFiles length
+        } else if (foundFiles.length === 0) {
           setAiSuggestion(
-            `No results found for "${searchQuery}". Try searching for related terms like "document", "report", or "drawing".`,
+            `No specific file mentioned or found for "${searchQuery}".`,
           );
-        } else if (matchedFiles.length > 5) {
-          setAiSuggestion(
-            `Found ${matchedFiles.length} results. Try refining your search with more specific terms.`,
-          );
+        } else if (foundFiles.length > 0) { // If files were found by the backend
+           // Temporarily use a generic suggestion without iterating over foundFiles
+           setAiSuggestion(typedData.suggestion || `AI analysis identified relevant file(s).`);
         }
       } else {
         // Fallback to basic search if RAG is disabled
         console.log("Using basic search (RAG disabled)");
 
-        // Basic search implementation
-        const results = files.filter(
-          (file) =>
-            file.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (file.metadata?.extractedText &&
-              file.metadata.extractedText
-                .toLowerCase()
-                .includes(searchQuery.toLowerCase())),
-        );
+        // Basic search implementation with added safety checks
+        const results = Array.isArray(files) // Ensure files is an array first
+          ? files.filter(
+              (file) =>
+                // Check if file object and name exist and are strings
+                (file && typeof file.name === 'string' && file.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                // Check nested properties carefully before accessing
+                (file && typeof file.metadata === 'object' && file.metadata !== null && typeof file.metadata.extractedText === 'string' &&
+                  file.metadata.extractedText
+                    .toLowerCase()
+                    .includes(searchQuery.toLowerCase()))
+            )
+          : []; // Default to empty array if files is not an array
 
-        setSearchResults(results);
+        setSearchResults(results); // Set results (guaranteed to be an array)
 
         // Generate AI suggestion
         if (results.length === 0) {
@@ -152,15 +163,14 @@ export const AISearch = ({ files, onFileSelect }: AISearchProps) => {
       } else if (error instanceof Error) {
         errorMessage = `Search failed: ${error.message}`;
       }
-      setSearchError(errorMessage);
+      // Log the raw error caught
+      console.error("Caught error details:", error);
+      setSearchError(errorMessage); // Set the formatted error message for UI
 
-      // Fallback to basic search on error
-      const results = files.filter((file) =>
-        file.name.toLowerCase().includes(searchQuery.toLowerCase()),
-      );
-      setSearchResults(results);
+      // Simplify catch block: Just clear results and set a generic suggestion
+      setSearchResults([]); // Ensure results are cleared on error
       setAiSuggestion(
-        "AI search is currently unavailable. Showing basic results instead.",
+        "AI search encountered an error.", // Simplified suggestion
       );
     } finally {
       setIsSearching(false);
@@ -249,38 +259,35 @@ export const AISearch = ({ files, onFileSelect }: AISearchProps) => {
               <p className="text-sm text-gray-500 mb-2">
                 Found {searchResults.length} results for "{searchQuery}"
               </p>
-              {searchResults.map((file) => (
+              {searchResults
+                .filter(file => file && file.id) // Add filter for valid file objects with IDs
+                .map((file) => (
                 <div
-                  key={file.id}
+                  key={file.id} // Now guaranteed to exist
                   className="flex flex-col p-3 hover:bg-gray-50 hover:border-orange-400 border border-transparent rounded-lg cursor-pointer transition-all"
-                  onClick={() => onFileSelect(file)}
+                  onClick={() => onFileSelect(file)} // Pass the valid file object
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <FileIcon fileType={file.file_type} />
+                      {/* Ensure file_type exists before passing */}
+                      <FileIcon fileType={file.file_type || 'file'} />
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-gray-900 truncate">
-                          {file.name}
+                          {file.name || 'Unnamed File'} {/* Provide fallback */}
                         </h4>
                         <p className="text-xs text-gray-500">
-                          {formatFileSize(file.size)} • Last updated{" "}
-                          {formatDate(file.updated_at || file.created_at)}
+                          {/* Provide fallbacks for size and date */}
+                          {formatFileSize(file.size ?? 0)} • Last updated{" "}
+                          {/* Ensure argument is always a string */}
+                          {formatDate(file.updated_at || file.created_at || new Date().toISOString())}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   {/* Show excerpt if available */}
-                  {searchExcerpts[file.id] && (
-                    <div className="mt-2 ml-12 p-2 bg-gray-50 border-l-2 border-blue-400 text-sm text-gray-700">
-                      <div className="flex items-start gap-2">
-                        <DocumentRegular className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
-                        <p className="text-xs italic">
-                          {searchExcerpts[file.id]}
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  {/* Remove excerpt display */}
+                  {/* {searchExcerpts[file.id] && ( ... )} */}
                 </div>
               ))}
             </div>

@@ -20,7 +20,7 @@ export default async function AIAssistancePage() {
       <DashboardSidebar activeTab="ai-assistance" />
       <ResponsiveLayout>
         <div className="p-4 md:p-6 h-full">
-          <h1 className="text-2xl font-bold mb-6">AI Engineering Experts</h1>
+          <h1 className="text-2xl font-bold mb-6">AI Engineering</h1>
           <div className="bg-white rounded-lg shadow-sm p-6 min-h-[80vh]">
             <AIAssistancePanel />
           </div>

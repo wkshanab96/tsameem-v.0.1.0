@@ -198,6 +198,7 @@ export async function POST(request: NextRequest) {
         console.log(`Using store webhook URL: ${sanitizedWebhookUrls.store}`);
         processDocumentWithN8n({
             fileId: fileId,
+            fileName: file.name, // Added fileName
             userId: userId,
             fileType: fileExtension,
             storagePath: storagePath,
