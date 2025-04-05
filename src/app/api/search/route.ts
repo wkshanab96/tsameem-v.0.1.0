@@ -130,20 +130,71 @@ export async function POST(request: NextRequest) {
           const data = JSON.parse(responseText);
           console.log("Parsed search response from n8n:", data);
 
-          // Basic validation: Check if the expected structure (e.g., results array) exists
-          // Adjust this check based on the actual expected successful response structure from n8n
-          if (!data || typeof data !== 'object') {
-              throw new Error("Invalid data structure received from search service.");
+          // Check if the response has the expected 'output' field
+          if (data && typeof data === 'object' && typeof data.output === 'string') {
+              const suggestionText = data.output;
+              let foundFiles = []; // Initialize empty array for results
+
+              // Attempt to extract filename (e.g., "filename.pdf") from the suggestion text
+              // This regex looks for quoted strings ending in common document extensions
+              const filenameRegex = /"([^"]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|xml|html|css|js|ts|py|java|c|cpp|h|hpp|cs|go|rb|php|sql|sh|bat|ps1))"/i;
+              const match = suggestionText.match(filenameRegex);
+
+              if (match && match[1]) {
+                  const extractedFilename = match[1];
+                  console.log("Extracted filename from suggestion:", extractedFilename);
+
+                  // Query Supabase for this file belonging to the user
+                  // Select fields matching the FileType definition exactly
+                  const { data: fileData, error: fileError } = await supabase
+                      .from("files")
+                      // Match FileType: id, name, folder_id, path, file_type, size, thumbnail, created_at, updated_at, created_by, starred, metadata
+                      .select("id, name, folder_id, path, file_type, size, thumbnail, created_at, updated_at, created_by, starred, metadata")
+                      .eq("created_by", user.id)
+                      .eq("name", extractedFilename) // Match by name
+                      .limit(1)
+                      .maybeSingle(); // Use maybeSingle() to return null instead of error if not found
+
+                  if (fileError) {
+                      console.error("Error fetching file by name:", fileError);
+                      // Proceed without the file if there's an error
+                  } else if (fileData) {
+                      console.log("Found matching file in DB:", fileData.name);
+                      // Add the full file object directly to the results array.
+                      // Ensure 'fileData' structure matches the frontend 'FileType'.
+                      // We selected "id, name, file_type, size, created_at, updated_at, metadata, path, is_folder"
+                      // Check if FileType requires more/different fields. Assuming it matches for now.
+                      foundFiles.push({
+                          ...fileData,
+                          // Add any default/missing fields required by FileType if necessary
+                          // e.g., children: fileData.is_folder ? [] : undefined,
+                      });
+                  } else {
+                      console.log("No matching file found in DB for:", extractedFilename);
+                  }
+              } else {
+                  console.log("No filename found in suggestion text.");
+              }
+
+              // Construct the response for the frontend
+              const frontendResponse = {
+                  results: foundFiles, // Include the found file(s) if any
+                  suggestion: suggestionText, // Always include the suggestion text
+              };
+              console.log("Transformed N8N response for frontend:", frontendResponse);
+              return NextResponse.json(frontendResponse);
+
+          } else {
+              // Handle unexpected N8N response structure
+              console.warn("Received unexpected data structure from n8n:", data);
+              throw new Error("Received unexpected data structure from AI search service.");
           }
 
-          // Return the parsed data
-          return NextResponse.json(data);
-
       } catch (parseError) {
-          console.error("Failed to parse n8n search response as JSON:", parseError);
-          // Return a specific error indicating invalid response from the webhook
+          console.error("Failed to parse or process n8n search response:", parseError);
+          // Return a specific error indicating invalid or unprocessable response from the webhook
           return NextResponse.json(
-              { error: "Received invalid response from AI search service.", results: [] },
+              { error: "Received invalid or unprocessable response from AI search service.", results: [] },
               { status: 502 } // 502 Bad Gateway seems appropriate here
           );
       }
